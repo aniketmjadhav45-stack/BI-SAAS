@@ -1,4 +1,4 @@
-import React from 'react';
+
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { LayoutDashboard, TrendingUp, HeadphonesIcon, DollarSign, Settings, LogOut } from 'lucide-react';

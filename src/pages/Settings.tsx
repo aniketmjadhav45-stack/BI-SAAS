@@ -17,7 +17,7 @@ export default function Settings() {
 
   useEffect(() => {
     async function loadDataSources() {
-      const { data, error } = await supabase.from('data_sources').select('*');
+      const { data } = await supabase.from('data_sources').select('*');
       if (data) setDataSources(data);
       setLoading(false);
     }

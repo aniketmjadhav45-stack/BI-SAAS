@@ -1,4 +1,4 @@
-import React from 'react';
+
 import { ArrowUpRight, ArrowDownRight, Minus } from 'lucide-react';
 
 interface MetricCardProps {
