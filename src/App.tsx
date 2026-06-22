@@ -11,6 +11,8 @@ import Support from './pages/Support';
 import Finance from './pages/Finance';
 import Settings from './pages/Settings';
 import ConnectDataSource from './pages/ConnectDataSource';
+import AskDatapulse from './pages/AskDatapulse';
+import MyReports from './pages/MyReports';
 
 function App() {
   return (
@@ -27,6 +29,8 @@ function App() {
               <Route path="/sales" element={<Sales />} />
               <Route path="/support" element={<Support />} />
               <Route path="/finance" element={<Finance />} />
+              <Route path="/ask" element={<AskDatapulse />} />
+              <Route path="/reports" element={<MyReports />} />
               <Route path="/settings" element={<Settings />} />
             </Route>
           </Route>

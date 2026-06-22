@@ -1,7 +1,6 @@
-
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { LayoutDashboard, TrendingUp, HeadphonesIcon, DollarSign, Settings, LogOut } from 'lucide-react';
+import { LayoutDashboard, TrendingUp, HeadphonesIcon, DollarSign, Settings, LogOut, Sparkles, Save } from 'lucide-react';
 
 export default function Layout() {
   const { user, signOut } = useAuth();
@@ -14,6 +13,8 @@ export default function Layout() {
 
   const navItems = [
     { name: 'Overview', path: '/', icon: LayoutDashboard },
+    { name: 'Ask Datapulse', path: '/ask', icon: Sparkles },
+    { name: 'My Reports', path: '/reports', icon: Save },
     { name: 'Sales', path: '/sales', icon: TrendingUp },
     { name: 'Support', path: '/support', icon: HeadphonesIcon },
     { name: 'Finance', path: '/finance', icon: DollarSign },
