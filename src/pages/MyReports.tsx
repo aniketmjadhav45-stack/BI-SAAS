@@ -13,8 +13,10 @@ interface SavedReport {
   config: ReportConfig;
   created_at: string;
   data_sources: {
+    id: string;
     name: string;
-    sheet_url: string;
+    sheet_url?: string;
+    parsed_data?: any[];
   };
 }
 
@@ -29,21 +31,26 @@ export default function MyReports() {
       if (!user) return;
       const { data } = await supabase
         .from('saved_reports')
-        .select('*, data_sources(name, sheet_url)')
+        .select('*, data_sources(id, name, sheet_url, parsed_data)')
         .eq('user_id', user.id)
         .order('created_at', { ascending: false });
         
       if (data) {
         setReports(data as any);
         
-        // Fetch sheet data for these reports
-        const uniqueUrls = [...new Set(data.map(r => (r as any).data_sources.sheet_url))];
+        const uniqueSources = [...new Map((data as any).map((item: any) =>
+          [item.data_sources.id, item.data_sources])).values()] as any[];
+          
         const cache: Record<string, any[]> = {};
         
-        await Promise.all(uniqueUrls.map(async (url: any) => {
+        await Promise.all(uniqueSources.map(async (source: any) => {
           try {
-            const raw = await fetchSheetData(url);
-            cache[url] = raw;
+            if (source.parsed_data) {
+              cache[source.id] = source.parsed_data;
+            } else if (source.sheet_url) {
+              const raw = await fetchSheetData(source.sheet_url);
+              cache[source.id] = raw;
+            }
           } catch (e) {
             console.error("Failed to load sheet data for reports", e);
           }
@@ -83,7 +90,7 @@ export default function MyReports() {
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: '3rem' }}>
         {reports.map(report => {
-          const rawData = sheetDataCache[report.data_sources.sheet_url] || [];
+          const rawData = sheetDataCache[report.data_sources.id] || [];
           return (
             <div key={report.id} style={{ position: 'relative' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '1rem' }}>

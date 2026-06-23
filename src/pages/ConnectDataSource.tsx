@@ -1,16 +1,19 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { fetchSheetData, extractSpreadsheetId } from '../lib/googleSheets';
 import { useAuth } from '../contexts/AuthContext';
-import { Link2, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { Link2, AlertCircle, CheckCircle2, FileSpreadsheet, Upload } from 'lucide-react';
+import * as XLSX from 'xlsx';
 
 export default function ConnectDataSource() {
+  const [connectionType, setConnectionType] = useState<'sheets' | 'excel'>('sheets');
   const [url, setUrl] = useState('');
   const [name, setName] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const { user } = useAuth();
   const navigate = useNavigate();
 
@@ -23,52 +26,96 @@ export default function ConnectDataSource() {
     if (!user) return;
 
     try {
-      // 1. Verify the URL is valid
-      const spreadsheetId = extractSpreadsheetId(url);
-      if (!spreadsheetId) {
-        throw new Error('Could not find a valid Spreadsheet ID in that URL.');
-      }
+      if (connectionType === 'sheets') {
+        const spreadsheetId = extractSpreadsheetId(url);
+        if (!spreadsheetId) {
+          throw new Error('Could not find a valid Spreadsheet ID in that URL.');
+        }
 
-      // 2. Test fetching the data to ensure it's public and valid
-      const data = await fetchSheetData(url);
-      
-      if (data.length === 0) {
-        throw new Error('The spreadsheet appears to be empty.');
-      }
+        const data = await fetchSheetData(url);
+        if (data.length === 0) throw new Error('The spreadsheet appears to be empty.');
 
-      // Check if essential columns exist (at least one of the expected ones)
-      const firstRow = data[0];
-      const hasExpectedCols = ['date', 'revenue', 'leads', 'tickets', 'attendance'].some(col => col in firstRow);
-      
-      if (!hasExpectedCols) {
-        throw new Error('The sheet does not contain expected columns like "date", "revenue", "leads", etc. Please check your sheet headers.');
-      }
+        const firstRow = data[0];
+        const hasExpectedCols = ['date', 'revenue', 'leads', 'tickets', 'attendance'].some(col => col in firstRow);
+        
+        if (!hasExpectedCols) {
+          throw new Error('The sheet does not contain expected columns like "date", "revenue", "leads", etc. Please check your sheet headers.');
+        }
 
-      // 3. Save to Supabase
-      const { error: dbError } = await supabase
-        .from('data_sources')
-        .insert([
-          { 
-            user_id: user.id, 
-            name: name || 'My Google Sheet', 
-            sheet_url: url 
+        const { error: dbError } = await supabase
+          .from('data_sources')
+          .insert([
+            { 
+              user_id: user.id, 
+              name: name || 'My Google Sheet', 
+              sheet_url: url 
+            }
+          ]);
+
+        if (dbError) throw new Error(`Database error: ${dbError.message}`);
+
+        completeConnection();
+      } else {
+        // Excel Upload
+        const file = fileInputRef.current?.files?.[0];
+        if (!file) throw new Error('Please select an Excel file to upload.');
+
+        const buffer = await file.arrayBuffer();
+        const workbook = XLSX.read(buffer, { type: 'array' });
+        
+        if (workbook.SheetNames.length === 0) {
+           throw new Error('The Excel file has no sheets.');
+        }
+
+        const firstSheetName = workbook.SheetNames[0];
+        const worksheet = workbook.Sheets[firstSheetName];
+        const json = XLSX.utils.sheet_to_json(worksheet, { defval: null });
+        
+        if (json.length === 0) throw new Error('The Excel file appears to be empty.');
+
+        const normalizedData = json.map((row: any) => {
+          const newRow: any = {};
+          for (const key in row) {
+             if (row[key] !== null) {
+               newRow[key.toLowerCase().trim()] = row[key];
+             }
           }
-        ]);
+          return newRow;
+        });
 
-      if (dbError) {
-        throw new Error(`Database error: ${dbError.message}. Make sure you created the data_sources table!`);
+        const firstRow = normalizedData[0];
+        const hasExpectedCols = ['date', 'revenue', 'leads', 'tickets', 'attendance'].some(col => col in firstRow);
+        
+        if (!hasExpectedCols) {
+          throw new Error('The Excel file does not contain expected columns like "date", "revenue", "leads", etc. Please check your headers.');
+        }
+
+        const { error: dbError } = await supabase
+          .from('data_sources')
+          .insert([
+            { 
+              user_id: user.id, 
+              name: name || file.name, 
+              parsed_data: normalizedData 
+            }
+          ]);
+
+        if (dbError) throw new Error(`Database error: ${dbError.message}`);
+
+        completeConnection();
       }
-
-      setSuccess(true);
-      setTimeout(() => {
-        navigate('/');
-      }, 1500);
-
     } catch (err: any) {
       setError(err.message || 'An unexpected error occurred.');
     } finally {
       setLoading(false);
     }
+  };
+
+  const completeConnection = () => {
+    setSuccess(true);
+    setTimeout(() => {
+      navigate('/');
+    }, 1500);
   };
 
   return (
@@ -78,9 +125,54 @@ export default function ConnectDataSource() {
         Connect a Data Source
       </h2>
       
+      <div style={{ display: 'flex', gap: '1rem', marginBottom: '1.5rem' }}>
+        <button 
+          type="button"
+          onClick={() => setConnectionType('sheets')}
+          style={{ 
+            flex: 1, 
+            padding: '1rem', 
+            borderRadius: 'var(--radius-md)', 
+            border: `2px solid ${connectionType === 'sheets' ? 'var(--accent-color)' : 'var(--border-color)'}`,
+            backgroundColor: connectionType === 'sheets' ? 'rgba(255, 107, 53, 0.1)' : 'var(--card-bg)',
+            color: 'var(--text-dark)',
+            fontWeight: 'bold',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: '0.5rem',
+            cursor: 'pointer'
+          }}
+        >
+          <Link2 size={20} /> Google Sheets
+        </button>
+        <button 
+          type="button"
+          onClick={() => setConnectionType('excel')}
+          style={{ 
+            flex: 1, 
+            padding: '1rem', 
+            borderRadius: 'var(--radius-md)', 
+            border: `2px solid ${connectionType === 'excel' ? 'var(--accent-color)' : 'var(--border-color)'}`,
+            backgroundColor: connectionType === 'excel' ? 'rgba(255, 107, 53, 0.1)' : 'var(--card-bg)',
+            color: 'var(--text-dark)',
+            fontWeight: 'bold',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: '0.5rem',
+            cursor: 'pointer'
+          }}
+        >
+          <FileSpreadsheet size={20} /> Excel Upload
+        </button>
+      </div>
+
       <div className="card">
         <p style={{ color: 'var(--text-secondary)', marginBottom: '1.5rem' }}>
-          Paste a public Google Sheets link below. Your sheet must be set to <strong>"Anyone with the link can view"</strong>.
+          {connectionType === 'sheets' 
+            ? 'Paste a public Google Sheets link below. Your sheet must be set to "Anyone with the link can view".'
+            : 'Upload a local Excel file (.xlsx) directly to Datapulse. The data will be securely stored in your account.'}
         </p>
 
         {error && (
@@ -104,25 +196,42 @@ export default function ConnectDataSource() {
               id="name"
               type="text"
               className="input"
-              placeholder="e.g. Q3 Sales Data"
+              placeholder={connectionType === 'sheets' ? "e.g. Q3 Sales Data" : "Leave blank to use filename"}
               value={name}
               onChange={(e) => setName(e.target.value)}
             />
           </div>
-          <div>
-            <label className="label" htmlFor="url">Google Sheets Link</label>
-            <input
-              id="url"
-              type="url"
-              className="input"
-              placeholder="https://docs.google.com/spreadsheets/d/..."
-              value={url}
-              onChange={(e) => setUrl(e.target.value)}
-              required
-            />
-          </div>
-          <button type="submit" className="btn btn-primary" disabled={loading} style={{ marginTop: '0.5rem' }}>
-            {loading ? 'Connecting & Verifying...' : 'Connect Sheet'}
+
+          {connectionType === 'sheets' ? (
+            <div>
+              <label className="label" htmlFor="url">Google Sheets Link</label>
+              <input
+                id="url"
+                type="url"
+                className="input"
+                placeholder="https://docs.google.com/spreadsheets/d/..."
+                value={url}
+                onChange={(e) => setUrl(e.target.value)}
+                required
+              />
+            </div>
+          ) : (
+            <div>
+              <label className="label" htmlFor="fileUpload">Excel File (.xlsx)</label>
+              <input
+                id="fileUpload"
+                type="file"
+                accept=".xlsx, .xls"
+                className="input"
+                ref={fileInputRef}
+                required
+                style={{ padding: '0.5rem', backgroundColor: 'var(--bg-color)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)', width: '100%' }}
+              />
+            </div>
+          )}
+
+          <button type="submit" className="btn btn-primary" disabled={loading} style={{ marginTop: '0.5rem', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}>
+            {loading ? 'Processing...' : (connectionType === 'sheets' ? <><Link2 size={18} /> Connect Sheet</> : <><Upload size={18} /> Upload Excel</>)}
           </button>
         </form>
       </div>

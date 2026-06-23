@@ -22,8 +22,12 @@ export default function Overview() {
           setDataSources(data);
           // For MVP, just load the first connected data source
           const source = data[0];
-          const rawData = await fetchSheetData(source.sheet_url);
-          
+          let rawData: any[] = [];
+          if (source.parsed_data) {
+            rawData = source.parsed_data;
+          } else if (source.sheet_url) {
+            rawData = await fetchSheetData(source.sheet_url);
+          }
           // Sort data by date ascending
           const sortedData = [...rawData].sort((a, b) => {
             const dateA = a.date ? new Date(a.date).getTime() : 0;

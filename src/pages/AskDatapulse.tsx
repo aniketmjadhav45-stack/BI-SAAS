@@ -27,7 +27,12 @@ export default function AskDatapulse() {
       if (data && data.length > 0) {
         setDataSource(data[0]);
         try {
-          const raw = await fetchSheetData(data[0].sheet_url);
+          let raw: any[] = [];
+          if (data[0].parsed_data) {
+            raw = data[0].parsed_data;
+          } else if (data[0].sheet_url) {
+            raw = await fetchSheetData(data[0].sheet_url);
+          }
           setSheetData(raw);
           if (raw.length > 0) {
             setColumns(Object.keys(raw[0]));
