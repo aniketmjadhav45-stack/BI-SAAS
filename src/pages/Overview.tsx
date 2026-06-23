@@ -430,7 +430,7 @@ function OverviewContent() {
         numericColumns.length > 0 && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
             {/* Top Chart Row: Dense Grid */}
-            <div style={{ display: 'grid', gridTemplateColumns: pieChartData.length > 0 ? '2fr 1fr' : '1fr 1fr', gap: '1.5rem' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: pieChartData.length > 0 ? '2fr 1fr' : '1fr', gap: '1.5rem' }}>
               
               {/* Primary Area Chart */}
               {primaryChartKey && (
@@ -459,8 +459,8 @@ function OverviewContent() {
                 </div>
               )}
 
-              {/* Dynamic Secondary Chart: Donut OR Bar */}
-              {pieChartData.length > 0 && primaryChartKey && categoricalColumn ? (
+              {/* Categorical Donut Chart */}
+              {pieChartData.length > 0 && primaryChartKey && categoricalColumn && (
                 <div className="card" style={{ display: 'flex', flexDirection: 'column' }}>
                   <h3 style={{ fontSize: '1.125rem', marginBottom: '1.5rem', fontWeight: 600 }}>{getTitle(primaryChartKey)} by {getTitle(categoricalColumn)}</h3>
                   <div style={{ flex: 1, minHeight: '300px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -498,7 +498,12 @@ function OverviewContent() {
                     ))}
                   </div>
                 </div>
-              ) : secondaryChartKey ? (
+              )}
+            </div>
+
+            {/* Secondary Charts Row */}
+            {secondaryChartKey && secondaryChartKey !== primaryChartKey && (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(400px, 1fr))', gap: '1.5rem' }}>
                 <div className="card" style={{ display: 'flex', flexDirection: 'column' }}>
                   <h3 style={{ fontSize: '1.125rem', marginBottom: '1.5rem', fontWeight: 600 }}>{getTitle(secondaryChartKey)} per Period</h3>
                   <div style={{ flex: 1, minHeight: '300px' }}>
@@ -517,8 +522,8 @@ function OverviewContent() {
                     </ResponsiveContainer>
                   </div>
                 </div>
-              ) : null}
-            </div>
+              </div>
+            )}
 
             {/* Embedded Table Row */}
             <div className="card" style={{ overflowX: 'auto', padding: 0 }}>
