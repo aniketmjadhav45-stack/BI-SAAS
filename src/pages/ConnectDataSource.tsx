@@ -13,6 +13,7 @@ export default function ConnectDataSource() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
+  const [selectedFileName, setSelectedFileName] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -224,9 +225,15 @@ export default function ConnectDataSource() {
                 accept=".xlsx, .xls"
                 className="input"
                 ref={fileInputRef}
+                onChange={(e) => setSelectedFileName(e.target.files?.[0]?.name || null)}
                 required
                 style={{ padding: '0.5rem', backgroundColor: 'var(--bg-color)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)', width: '100%' }}
               />
+              {selectedFileName && (
+                <div style={{ marginTop: '0.5rem', fontSize: '0.875rem', color: 'var(--success-color)', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                  <FileSpreadsheet size={16} /> Selected: {selectedFileName}
+                </div>
+              )}
             </div>
           )}
 
