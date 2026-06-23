@@ -476,14 +476,14 @@ function OverviewContent() {
                           dataKey="value"
                           stroke="none"
                         >
-                          {pieChartData.map((entry, index) => (
+                          {pieChartData.map((_, index) => (
                             <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
                           ))}
                         </Pie>
                         <RechartsTooltip 
                           contentStyle={{ backgroundColor: 'rgba(15, 23, 42, 0.9)', borderColor: 'var(--border-color)', borderRadius: 'var(--radius-md)', backdropFilter: 'blur(8px)' }}
                           itemStyle={{ color: '#fff' }}
-                          formatter={(value: number) => value.toLocaleString()}
+                          formatter={(value: any) => Number(value).toLocaleString()}
                         />
                       </PieChart>
                     </ResponsiveContainer>
