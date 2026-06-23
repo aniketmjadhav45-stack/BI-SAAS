@@ -54,10 +54,18 @@ export default function Overview() {
           rawData = await fetchSheetData(source.sheet_url);
         }
         
+        // Find the date column dynamically (fallback to 'date' if not found)
+        const firstRow = rawData.length > 0 ? rawData[0] : null;
+        let dateCol = 'date';
+        if (firstRow) {
+           const possibleDateCol = Object.keys(firstRow).find(k => k.toLowerCase().includes('date') || k.toLowerCase() === 'time');
+           if (possibleDateCol) dateCol = possibleDateCol;
+        }
+
         // Sort data by date ascending
         const sortedData = [...rawData].sort((a, b) => {
-          const dateA = a.date ? new Date(a.date).getTime() : 0;
-          const dateB = b.date ? new Date(b.date).getTime() : 0;
+          const dateA = a[dateCol] ? new Date(a[dateCol]).getTime() : 0;
+          const dateB = b[dateCol] ? new Date(b[dateCol]).getTime() : 0;
           return dateA - dateB;
         });
         
@@ -99,71 +107,91 @@ export default function Overview() {
     );
   }
 
-  const getMetric = (row: any, primary: string, secondary: string) => Number(row?.[primary]) || Number(row?.[secondary]) || 0;
+  // Analyze columns dynamically
+  const sampleRow = sheetData.length > 0 ? sheetData[0] : null;
+  const numericColumns: string[] = [];
+  const dateColumn = sampleRow ? Object.keys(sampleRow).find(k => k.toLowerCase().includes('date') || k.toLowerCase() === 'time') || 'date' : 'date';
 
-  // Group data by week for accurate Week-over-Week calculations
-  const weeklyData: Record<string, { revenue: number, leads: number, tickets: number, attendance: number, dateStr: string, timestamp: number }> = {};
+  if (sampleRow) {
+    Object.keys(sampleRow).forEach(key => {
+      if (key.toLowerCase() === 'id' || key === dateColumn) return;
+      
+      // Check if it looks numeric
+      const isNumeric = sheetData.slice(0, 10).some(row => {
+         const val = row[key];
+         return typeof val === 'number' || (typeof val === 'string' && val.trim() !== '' && !isNaN(Number(val)));
+      });
+      
+      if (isNumeric) {
+        numericColumns.push(key);
+      }
+    });
+  }
+
+  // Group data by week
+  const weeklyData: Record<string, { dateStr: string, timestamp: number, metrics: Record<string, number> }> = {};
+  const totalMetrics: Record<string, number> = {};
   
-  let totalRevenue = 0;
-  let totalLeads = 0;
-  let totalTickets = 0;
-  let totalAttendance = 0;
+  numericColumns.forEach(col => totalMetrics[col] = 0);
 
   sheetData.forEach(row => {
-    if (!row.date) return;
-    const dateObj = new Date(row.date);
+    const rawDate = row[dateColumn];
+    if (!rawDate) return;
+    
+    // Attempt to parse Excel serial dates or normal dates
+    let dateObj: Date;
+    if (typeof rawDate === 'number') {
+      // Excel serial date (days since Dec 30, 1899)
+      dateObj = new Date(Math.round((rawDate - 25569) * 86400 * 1000));
+    } else {
+      dateObj = new Date(rawDate);
+    }
+    
     if (isNaN(dateObj.getTime())) return;
     
-    const rev = getMetric(row, 'revenue', 'sales');
-    const leads = getMetric(row, 'leads', 'units_sold');
-    const tix = getMetric(row, 'tickets', 'profit');
-    const att = getMetric(row, 'attendance', 'attendance');
-
-    totalRevenue += rev;
-    totalLeads += leads;
-    totalTickets += tix;
-    totalAttendance += att;
-
-    // Get the start of the week (Monday)
-    const day = dateObj.getDay() || 7; // Convert Sunday (0) to 7
+    const day = dateObj.getDay() || 7;
     dateObj.setHours(-24 * (day - 1));
     const weekKey = dateObj.toISOString().split('T')[0];
     
     if (!weeklyData[weekKey]) {
-      weeklyData[weekKey] = { revenue: 0, leads: 0, tickets: 0, attendance: 0, dateStr: weekKey, timestamp: dateObj.getTime() };
+      weeklyData[weekKey] = { dateStr: weekKey, timestamp: dateObj.getTime(), metrics: {} };
+      numericColumns.forEach(col => weeklyData[weekKey].metrics[col] = 0);
     }
     
-    weeklyData[weekKey].revenue += rev;
-    weeklyData[weekKey].leads += leads;
-    weeklyData[weekKey].tickets += tix;
-    weeklyData[weekKey].attendance += att;
+    numericColumns.forEach(col => {
+       const val = Number(row[col]) || 0;
+       totalMetrics[col] += val;
+       weeklyData[weekKey].metrics[col] += val;
+    });
   });
 
-  // Sort weeks
   const sortedWeeks = Object.values(weeklyData).sort((a, b) => a.timestamp - b.timestamp);
-  
   const currentPeriod = sortedWeeks.length > 0 ? sortedWeeks[sortedWeeks.length - 1] : null;
   const previousPeriod = sortedWeeks.length > 1 ? sortedWeeks[sortedWeeks.length - 2] : null;
 
-  const currentRevenue = currentPeriod?.revenue || 0;
-  const prevRevenue = previousPeriod?.revenue || 0;
+  // Format chart data dynamically
+  const chartData = sheetData.map(row => {
+    let dateLabel = 'Unknown';
+    if (row[dateColumn]) {
+       if (typeof row[dateColumn] === 'number') {
+           const d = new Date(Math.round((row[dateColumn] - 25569) * 86400 * 1000));
+           dateLabel = d.toISOString().split('T')[0];
+       } else {
+           dateLabel = String(row[dateColumn]);
+       }
+    }
   
-  const currentLeads = currentPeriod?.leads || 0;
-  const prevLeads = previousPeriod?.leads || 0;
-  
-  const currentTickets = currentPeriod?.tickets || 0;
-  const prevTickets = previousPeriod?.tickets || 0;
-  
-  const currentAttendance = currentPeriod?.attendance || 0;
-  const prevAttendance = previousPeriod?.attendance || 0;
+    const dataPoint: any = { name: dateLabel };
+    numericColumns.forEach(col => {
+       dataPoint[col] = Number(row[col]) || 0;
+    });
+    return dataPoint;
+  });
 
-  // Chart data formatting
-  const chartData = sheetData.map(row => ({
-    name: row.date || 'Unknown',
-    Revenue: getMetric(row, 'revenue', 'sales'),
-    Tickets: getMetric(row, 'tickets', 'profit'),
-    Leads: getMetric(row, 'leads', 'units_sold'),
-  }));
+  const primaryChartKey = numericColumns.length > 0 ? numericColumns[0] : null;
+  const secondaryChartKey = numericColumns.length > 1 ? numericColumns[1] : primaryChartKey;
+
+  const getTitle = (key: string) => key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
 
   return (
     <div style={{ opacity: loadingData ? 0.6 : 1, transition: 'opacity 0.3s ease' }}>
@@ -171,7 +199,6 @@ export default function Overview() {
         <h2 style={{ fontSize: '1.75rem', letterSpacing: '-0.02em' }}>Dashboard Overview</h2>
         
         <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-          {/* Data Source Selector */}
           <div style={{ position: 'relative' }}>
             <select
               value={selectedSourceId || ''}
@@ -211,75 +238,82 @@ export default function Overview() {
       
       {/* KPI Cards Grid */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '1.5rem', marginBottom: '2rem' }}>
-        <MetricCard 
-          title="Total Revenue" 
-          value={totalRevenue.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })} 
-          prefix="$"
-          currentValue={currentRevenue}
-          previousValue={prevRevenue}
-        />
-        <MetricCard 
-          title="Total Leads" 
-          value={totalLeads.toLocaleString()} 
-          currentValue={currentLeads}
-          previousValue={prevLeads}
-        />
-        <MetricCard 
-          title="Total Tickets" 
-          value={totalTickets.toLocaleString()} 
-          currentValue={currentTickets}
-          previousValue={prevTickets}
-          invertColors={true}
-        />
-        <MetricCard 
-          title="Total Attendance" 
-          value={totalAttendance.toLocaleString()} 
-          currentValue={currentAttendance}
-          previousValue={prevAttendance}
-        />
+        {numericColumns.length === 0 && !loadingData && sheetData.length > 0 ? (
+          <p style={{ color: 'var(--text-secondary)' }}>No numeric data found to display metrics.</p>
+        ) : (
+          numericColumns.map(col => {
+            const isMonetary = ['revenue', 'sales', 'price', 'cost', 'spend', 'amount', 'profit', 'gst', 'tax'].some(k => col.toLowerCase().includes(k));
+            const prefix = isMonetary ? '$' : '';
+            const title = getTitle(col);
+            
+            const totalVal = totalMetrics[col] || 0;
+            const currentVal = currentPeriod?.metrics[col] || 0;
+            const prevVal = previousPeriod?.metrics[col] || 0;
+            
+            const invertColors = ['ticket', 'error', 'bug', 'absence', 'churn', 'bounce', 'leave'].some(k => col.toLowerCase().includes(k));
+
+            return (
+              <MetricCard 
+                key={col}
+                title={`Total ${title}`} 
+                value={totalVal.toLocaleString(undefined, { minimumFractionDigits: isMonetary ? 2 : 0, maximumFractionDigits: isMonetary ? 2 : 0 })} 
+                prefix={prefix}
+                currentValue={currentVal}
+                previousValue={prevVal}
+                invertColors={invertColors}
+              />
+            );
+          })
+        )}
       </div>
 
       {/* Charts Grid */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(400px, 1fr))', gap: '1.5rem' }}>
-        {/* Revenue Line Chart */}
-        <div className="card">
-          <h3 style={{ fontSize: '1.125rem', marginBottom: '1.5rem', fontWeight: 600 }}>Revenue Trend</h3>
-          <div style={{ height: '300px' }}>
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={chartData} margin={{ top: 5, right: 20, bottom: 5, left: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="var(--border-light)" vertical={false} />
-                <XAxis dataKey="name" stroke="var(--text-secondary)" fontSize={12} tickLine={false} axisLine={false} />
-                <YAxis stroke="var(--text-secondary)" fontSize={12} tickLine={false} axisLine={false} tickFormatter={(value) => `$${value}`} />
-                <Tooltip 
-                  contentStyle={{ backgroundColor: 'rgba(15, 23, 42, 0.9)', borderColor: 'var(--border-color)', borderRadius: 'var(--radius-md)', backdropFilter: 'blur(8px)' }}
-                  itemStyle={{ color: '#fff' }}
-                />
-                <Line type="monotone" dataKey="Revenue" stroke="var(--accent-color)" strokeWidth={3} dot={{ r: 0 }} activeDot={{ r: 6, fill: '#fff', stroke: 'var(--accent-color)', strokeWidth: 2 }} />
-              </LineChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
+      {numericColumns.length > 0 && (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(400px, 1fr))', gap: '1.5rem' }}>
+          {/* Primary Line Chart */}
+          {primaryChartKey && (
+            <div className="card">
+              <h3 style={{ fontSize: '1.125rem', marginBottom: '1.5rem', fontWeight: 600 }}>{getTitle(primaryChartKey)} Trend</h3>
+              <div style={{ height: '300px' }}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={chartData} margin={{ top: 5, right: 20, bottom: 5, left: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="var(--border-light)" vertical={false} />
+                    <XAxis dataKey="name" stroke="var(--text-secondary)" fontSize={12} tickLine={false} axisLine={false} />
+                    <YAxis stroke="var(--text-secondary)" fontSize={12} tickLine={false} axisLine={false} />
+                    <Tooltip 
+                      contentStyle={{ backgroundColor: 'rgba(15, 23, 42, 0.9)', borderColor: 'var(--border-color)', borderRadius: 'var(--radius-md)', backdropFilter: 'blur(8px)' }}
+                      itemStyle={{ color: '#fff' }}
+                    />
+                    <Line type="monotone" dataKey={primaryChartKey} stroke="var(--accent-color)" strokeWidth={3} dot={{ r: 0 }} activeDot={{ r: 6, fill: '#fff', stroke: 'var(--accent-color)', strokeWidth: 2 }} />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+          )}
 
-        {/* Tickets Bar Chart */}
-        <div className="card">
-          <h3 style={{ fontSize: '1.125rem', marginBottom: '1.5rem', fontWeight: 600 }}>Tickets per Period</h3>
-          <div style={{ height: '300px' }}>
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={chartData} margin={{ top: 5, right: 20, bottom: 5, left: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="var(--border-light)" vertical={false} />
-                <XAxis dataKey="name" stroke="var(--text-secondary)" fontSize={12} tickLine={false} axisLine={false} />
-                <YAxis stroke="var(--text-secondary)" fontSize={12} tickLine={false} axisLine={false} />
-                <Tooltip 
-                  contentStyle={{ backgroundColor: 'rgba(15, 23, 42, 0.9)', borderColor: 'var(--border-color)', borderRadius: 'var(--radius-md)', backdropFilter: 'blur(8px)' }}
-                  itemStyle={{ color: '#fff' }}
-                  cursor={{ fill: 'rgba(255,255,255,0.05)' }}
-                />
-                <Bar dataKey="Tickets" fill="#10B981" radius={[4, 4, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
+          {/* Secondary Bar Chart */}
+          {secondaryChartKey && (
+            <div className="card">
+              <h3 style={{ fontSize: '1.125rem', marginBottom: '1.5rem', fontWeight: 600 }}>{getTitle(secondaryChartKey)} per Period</h3>
+              <div style={{ height: '300px' }}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={chartData} margin={{ top: 5, right: 20, bottom: 5, left: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="var(--border-light)" vertical={false} />
+                    <XAxis dataKey="name" stroke="var(--text-secondary)" fontSize={12} tickLine={false} axisLine={false} />
+                    <YAxis stroke="var(--text-secondary)" fontSize={12} tickLine={false} axisLine={false} />
+                    <Tooltip 
+                      contentStyle={{ backgroundColor: 'rgba(15, 23, 42, 0.9)', borderColor: 'var(--border-color)', borderRadius: 'var(--radius-md)', backdropFilter: 'blur(8px)' }}
+                      itemStyle={{ color: '#fff' }}
+                      cursor={{ fill: 'rgba(255,255,255,0.05)' }}
+                    />
+                    <Bar dataKey={secondaryChartKey} fill="#10B981" radius={[4, 4, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+          )}
         </div>
-      </div>
+      )}
     </div>
   );
 }
