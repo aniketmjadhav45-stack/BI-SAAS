@@ -24,9 +24,9 @@ export default function Layout() {
   const userName = user?.user_metadata?.full_name || user?.email || 'User';
 
   return (
-    <div className="flex h-screen" style={{ backgroundColor: 'var(--bg-color-light)' }}>
+    <div className="flex h-screen" style={{ backgroundColor: 'transparent' }}>
       {/* Sidebar */}
-      <aside style={{ width: 'var(--sidebar-width)', backgroundColor: 'var(--bg-color)', borderRight: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column' }}>
+      <aside style={{ width: 'var(--sidebar-width)', backgroundColor: 'rgba(11, 17, 33, 0.4)', backdropFilter: 'blur(16px)', WebkitBackdropFilter: 'blur(16px)', borderRight: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column' }}>
         <div style={{ padding: '1.5rem', borderBottom: '1px solid var(--border-color)' }}>
           <h1 style={{ color: 'var(--accent-color)', fontSize: '1.5rem', fontWeight: 700, margin: 0 }}>Datapulse</h1>
         </div>
@@ -74,7 +74,7 @@ export default function Layout() {
       {/* Main Content */}
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
         {/* Header */}
-        <header style={{ height: '70px', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', padding: '0 2rem', borderBottom: '1px solid var(--border-color)', backgroundColor: 'var(--bg-color)' }}>
+        <header style={{ height: '70px', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', padding: '0 2rem', borderBottom: '1px solid var(--border-color)', backgroundColor: 'rgba(11, 17, 33, 0.4)', backdropFilter: 'blur(16px)', WebkitBackdropFilter: 'blur(16px)' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
             <div style={{ textAlign: 'right' }}>
               <p style={{ margin: 0, fontWeight: 500, fontSize: '0.875rem' }}>{userName}</p>

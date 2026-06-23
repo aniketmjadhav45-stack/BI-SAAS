@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { fetchSheetData, type SheetDataRow } from '../lib/googleSheets';
-import { PlusCircle, Database, AlertCircle } from 'lucide-react';
+import { PlusCircle, Database, AlertCircle, ChevronDown } from 'lucide-react';
 import MetricCard from '../components/MetricCard';
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 
@@ -11,68 +11,90 @@ export default function Overview() {
   const [sheetData, setSheetData] = useState<SheetDataRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [selectedSourceId, setSelectedSourceId] = useState<string | null>(null);
+  const [loadingData, setLoadingData] = useState(false);
 
   useEffect(() => {
-    async function loadDashboard() {
+    async function loadSources() {
       try {
-        const { data, error: dbError } = await supabase.from('data_sources').select('*');
+        const { data, error: dbError } = await supabase
+          .from('data_sources')
+          .select('*')
+          .order('created_at', { ascending: false }); // Newest first
+          
         if (dbError) throw dbError;
         
         if (data && data.length > 0) {
           setDataSources(data);
-          // For MVP, just load the first connected data source
-          const source = data[0];
-          let rawData: any[] = [];
-          if (source.parsed_data) {
-            rawData = source.parsed_data;
-          } else if (source.sheet_url) {
-            rawData = await fetchSheetData(source.sheet_url);
-          }
-          // Sort data by date ascending
-          const sortedData = [...rawData].sort((a, b) => {
-            const dateA = a.date ? new Date(a.date).getTime() : 0;
-            const dateB = b.date ? new Date(b.date).getTime() : 0;
-            return dateA - dateB;
-          });
-          
-          setSheetData(sortedData);
+          setSelectedSourceId(data[0].id); // Auto-select newest
         }
       } catch (err: any) {
-        setError(err.message || 'Failed to load dashboard data');
+        setError(err.message || 'Failed to load data sources');
       } finally {
         setLoading(false);
       }
     }
-    loadDashboard();
+    loadSources();
   }, []);
 
+  useEffect(() => {
+    async function loadData() {
+      if (!selectedSourceId || dataSources.length === 0) return;
+      
+      setLoadingData(true);
+      setError(null);
+      try {
+        const source = dataSources.find(s => s.id === selectedSourceId);
+        if (!source) return;
+
+        let rawData: any[] = [];
+        if (source.parsed_data) {
+          rawData = source.parsed_data;
+        } else if (source.sheet_url) {
+          rawData = await fetchSheetData(source.sheet_url);
+        }
+        
+        // Sort data by date ascending
+        const sortedData = [...rawData].sort((a, b) => {
+          const dateA = a.date ? new Date(a.date).getTime() : 0;
+          const dateB = b.date ? new Date(b.date).getTime() : 0;
+          return dateA - dateB;
+        });
+        
+        setSheetData(sortedData);
+      } catch (err: any) {
+        setError(err.message || 'Failed to load dashboard data');
+      } finally {
+        setLoadingData(false);
+      }
+    }
+    loadData();
+  }, [selectedSourceId, dataSources]);
+
   if (loading) {
-    return <div style={{ color: 'var(--text-secondary)' }}>Loading dashboard...</div>;
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '60vh', color: 'var(--text-secondary)' }}>
+        <div className="animate-pulse" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          <Database size={24} /> Loading dashboard...
+        </div>
+      </div>
+    );
   }
 
   if (dataSources.length === 0) {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '60vh', textAlign: 'center' }}>
-        <div style={{ backgroundColor: 'var(--bg-color-light)', padding: '1.5rem', borderRadius: '50%', marginBottom: '1.5rem' }}>
+        <div style={{ backgroundColor: 'rgba(255, 107, 53, 0.1)', padding: '1.5rem', borderRadius: '50%', marginBottom: '1.5rem', boxShadow: 'var(--shadow-glow)' }}>
           <Database size={48} color="var(--accent-color)" />
         </div>
-        <h2 style={{ fontSize: '1.5rem', marginBottom: '0.75rem' }}>No data sources connected</h2>
-        <p style={{ color: 'var(--text-secondary)', maxWidth: '400px', marginBottom: '2rem' }}>
-          Connect your first Google Sheet to Datapulse to start seeing your metrics and charts instantly.
+        <h2 style={{ fontSize: '1.75rem', marginBottom: '0.75rem', color: 'var(--text-primary)' }}>No data sources connected</h2>
+        <p style={{ color: 'var(--text-secondary)', maxWidth: '400px', marginBottom: '2rem', fontSize: '1.1rem' }}>
+          Connect your first Google Sheet or Excel file to Datapulse to start seeing your metrics instantly.
         </p>
         <Link to="/connect" className="btn btn-primary" style={{ fontSize: '1rem', padding: '0.75rem 1.5rem' }}>
           <PlusCircle size={20} style={{ marginRight: '0.5rem' }} />
-          Connect your first data source
+          Connect Data Source
         </Link>
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div style={{ display: 'flex', gap: '0.5rem', padding: '1rem', backgroundColor: 'rgba(239, 68, 68, 0.1)', color: 'var(--danger-color)', borderRadius: 'var(--radius-md)' }}>
-        <AlertCircle size={20} />
-        <p style={{ margin: 0 }}>{error}</p>
       </div>
     );
   }
@@ -135,7 +157,7 @@ export default function Overview() {
   const currentAttendance = currentPeriod?.attendance || 0;
   const prevAttendance = previousPeriod?.attendance || 0;
 
-  // Chart data formatting (Daily trend looks better for charts)
+  // Chart data formatting
   const chartData = sheetData.map(row => ({
     name: row.date || 'Unknown',
     Revenue: getMetric(row, 'revenue', 'sales'),
@@ -144,32 +166,66 @@ export default function Overview() {
   }));
 
   return (
-    <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
-        <h2 style={{ fontSize: '1.5rem' }}>Dashboard Overview</h2>
-        <Link to="/connect" className="btn btn-secondary">
-          <PlusCircle size={16} style={{ marginRight: '0.5rem' }} />
-          Add Data Source
-        </Link>
+    <div style={{ opacity: loadingData ? 0.6 : 1, transition: 'opacity 0.3s ease' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem' }}>
+        <h2 style={{ fontSize: '1.75rem', letterSpacing: '-0.02em' }}>Dashboard Overview</h2>
+        
+        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+          {/* Data Source Selector */}
+          <div style={{ position: 'relative' }}>
+            <select
+              value={selectedSourceId || ''}
+              onChange={(e) => setSelectedSourceId(e.target.value)}
+              className="input"
+              style={{
+                appearance: 'none',
+                paddingRight: '2.5rem',
+                backgroundColor: 'rgba(255,255,255,0.05)',
+                border: '1px solid var(--border-light)',
+                cursor: 'pointer',
+                fontWeight: 500
+              }}
+            >
+              {dataSources.map(ds => (
+                <option key={ds.id} value={ds.id} style={{ backgroundColor: 'var(--bg-color)', color: 'white' }}>
+                  {ds.name || 'Unnamed Source'} {ds.parsed_data ? '(Excel)' : '(Sheets)'}
+                </option>
+              ))}
+            </select>
+            <ChevronDown size={16} style={{ position: 'absolute', right: '1rem', top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', color: 'var(--text-secondary)' }} />
+          </div>
+
+          <Link to="/connect" className="btn btn-primary" style={{ boxShadow: 'none' }}>
+            <PlusCircle size={16} style={{ marginRight: '0.5rem' }} />
+            New Source
+          </Link>
+        </div>
       </div>
+
+      {error && (
+        <div style={{ display: 'flex', gap: '0.5rem', padding: '1rem', backgroundColor: 'rgba(239, 68, 68, 0.1)', color: 'var(--danger-color)', borderRadius: 'var(--radius-md)', marginBottom: '1.5rem', border: '1px solid rgba(239, 68, 68, 0.2)' }}>
+          <AlertCircle size={20} />
+          <p style={{ margin: 0 }}>{error}</p>
+        </div>
+      )}
       
       {/* KPI Cards Grid */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '1.5rem', marginBottom: '2rem' }}>
         <MetricCard 
-          title="Total Revenue (or Sales)" 
+          title="Total Revenue" 
           value={totalRevenue.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })} 
           prefix="$"
           currentValue={currentRevenue}
           previousValue={prevRevenue}
         />
         <MetricCard 
-          title="Total Leads (or Units)" 
+          title="Total Leads" 
           value={totalLeads.toLocaleString()} 
           currentValue={currentLeads}
           previousValue={prevLeads}
         />
         <MetricCard 
-          title="Total Tickets (or Profit)" 
+          title="Total Tickets" 
           value={totalTickets.toLocaleString()} 
           currentValue={currentTickets}
           previousValue={prevTickets}
@@ -187,18 +243,18 @@ export default function Overview() {
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(400px, 1fr))', gap: '1.5rem' }}>
         {/* Revenue Line Chart */}
         <div className="card">
-          <h3 style={{ fontSize: '1.125rem', marginBottom: '1.5rem' }}>Revenue Trend</h3>
+          <h3 style={{ fontSize: '1.125rem', marginBottom: '1.5rem', fontWeight: 600 }}>Revenue Trend</h3>
           <div style={{ height: '300px' }}>
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={chartData} margin={{ top: 5, right: 20, bottom: 5, left: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="var(--border-color)" vertical={false} />
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--border-light)" vertical={false} />
                 <XAxis dataKey="name" stroke="var(--text-secondary)" fontSize={12} tickLine={false} axisLine={false} />
                 <YAxis stroke="var(--text-secondary)" fontSize={12} tickLine={false} axisLine={false} tickFormatter={(value) => `$${value}`} />
                 <Tooltip 
-                  contentStyle={{ backgroundColor: 'var(--card-bg)', borderColor: 'var(--border-color)', borderRadius: 'var(--radius-md)' }}
-                  itemStyle={{ color: 'var(--text-dark)' }}
+                  contentStyle={{ backgroundColor: 'rgba(15, 23, 42, 0.9)', borderColor: 'var(--border-color)', borderRadius: 'var(--radius-md)', backdropFilter: 'blur(8px)' }}
+                  itemStyle={{ color: '#fff' }}
                 />
-                <Line type="monotone" dataKey="Revenue" stroke="var(--accent-color)" strokeWidth={3} dot={{ r: 4, fill: 'var(--accent-color)', strokeWidth: 0 }} activeDot={{ r: 6 }} />
+                <Line type="monotone" dataKey="Revenue" stroke="var(--accent-color)" strokeWidth={3} dot={{ r: 0 }} activeDot={{ r: 6, fill: '#fff', stroke: 'var(--accent-color)', strokeWidth: 2 }} />
               </LineChart>
             </ResponsiveContainer>
           </div>
@@ -206,17 +262,17 @@ export default function Overview() {
 
         {/* Tickets Bar Chart */}
         <div className="card">
-          <h3 style={{ fontSize: '1.125rem', marginBottom: '1.5rem' }}>Tickets per Period</h3>
+          <h3 style={{ fontSize: '1.125rem', marginBottom: '1.5rem', fontWeight: 600 }}>Tickets per Period</h3>
           <div style={{ height: '300px' }}>
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={chartData} margin={{ top: 5, right: 20, bottom: 5, left: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="var(--border-color)" vertical={false} />
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--border-light)" vertical={false} />
                 <XAxis dataKey="name" stroke="var(--text-secondary)" fontSize={12} tickLine={false} axisLine={false} />
                 <YAxis stroke="var(--text-secondary)" fontSize={12} tickLine={false} axisLine={false} />
                 <Tooltip 
-                  contentStyle={{ backgroundColor: 'var(--card-bg)', borderColor: 'var(--border-color)', borderRadius: 'var(--radius-md)' }}
-                  itemStyle={{ color: 'var(--text-dark)' }}
-                  cursor={{ fill: 'rgba(0,0,0,0.05)' }}
+                  contentStyle={{ backgroundColor: 'rgba(15, 23, 42, 0.9)', borderColor: 'var(--border-color)', borderRadius: 'var(--radius-md)', backdropFilter: 'blur(8px)' }}
+                  itemStyle={{ color: '#fff' }}
+                  cursor={{ fill: 'rgba(255,255,255,0.05)' }}
                 />
                 <Bar dataKey="Tickets" fill="#10B981" radius={[4, 4, 0, 0]} />
               </BarChart>

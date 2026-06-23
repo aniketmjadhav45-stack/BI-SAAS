@@ -31,9 +31,10 @@ export default function MetricCard({ title, value, previousValue, currentValue, 
   if (isBad) colorClass = 'var(--danger-color)';
 
   return (
-    <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-      <h3 style={{ fontSize: '0.875rem', color: 'var(--text-secondary)', fontWeight: 500 }}>{title}</h3>
-      <div style={{ fontSize: '1.875rem', fontWeight: 700, color: 'var(--text-dark)' }}>
+    <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', position: 'relative', overflow: 'hidden' }}>
+      <div style={{ position: 'absolute', top: '-20px', right: '-20px', width: '100px', height: '100px', background: 'radial-gradient(circle, var(--accent-glow) 0%, transparent 70%)', opacity: 0.5, borderRadius: '50%' }} />
+      <h3 style={{ fontSize: '0.875rem', color: 'var(--text-secondary)', fontWeight: 500, letterSpacing: '0.05em', textTransform: 'uppercase' }}>{title}</h3>
+      <div style={{ fontSize: '2.25rem', fontWeight: 700, color: 'var(--text-primary)', letterSpacing: '-0.02em' }}>
         {prefix}{value}
       </div>
       
