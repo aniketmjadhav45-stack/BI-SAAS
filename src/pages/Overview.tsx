@@ -2,9 +2,11 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { fetchSheetData, type SheetDataRow } from '../lib/googleSheets';
-import { PlusCircle, Database, AlertCircle, ChevronDown } from 'lucide-react';
+import { PlusCircle, Database, AlertCircle, ChevronDown, Table as TableIcon, LayoutDashboard } from 'lucide-react';
 import MetricCard from '../components/MetricCard';
-import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import { LineChart, Line, BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer } from 'recharts';
+
+const COLORS = ['#FF6B35', '#10B981', '#3B82F6', '#8B5CF6', '#F59E0B', '#EF4444', '#EC4899', '#06B6D4'];
 
 export default function Overview() {
   const [dataSources, setDataSources] = useState<any[]>([]);
@@ -13,6 +15,9 @@ export default function Overview() {
   const [error, setError] = useState<string | null>(null);
   const [selectedSourceId, setSelectedSourceId] = useState<string | null>(null);
   const [loadingData, setLoadingData] = useState(false);
+  
+  // Layout persistence state
+  const [viewAsTable, setViewAsTable] = useState(false);
 
   useEffect(() => {
     async function loadSources() {
@@ -47,6 +52,13 @@ export default function Overview() {
         const source = dataSources.find(s => s.id === selectedSourceId);
         if (!source) return;
 
+        // Restore saved layout config
+        if (source.layout_config && typeof source.layout_config.viewAsTable === 'boolean') {
+          setViewAsTable(source.layout_config.viewAsTable);
+        } else {
+          setViewAsTable(false); // Default
+        }
+
         let rawData: any[] = [];
         if (source.parsed_data) {
           rawData = source.parsed_data;
@@ -54,7 +66,7 @@ export default function Overview() {
           rawData = await fetchSheetData(source.sheet_url);
         }
         
-        // Find the date column dynamically (fallback to 'date' if not found)
+        // Find the date column dynamically
         const firstRow = rawData.length > 0 ? rawData[0] : null;
         let dateCol = 'date';
         if (firstRow) {
@@ -78,6 +90,30 @@ export default function Overview() {
     }
     loadData();
   }, [selectedSourceId, dataSources]);
+
+  const toggleViewMode = async (isTable: boolean) => {
+    setViewAsTable(isTable);
+    if (!selectedSourceId) return;
+
+    try {
+      // Save config to Supabase
+      const { error: updateError } = await supabase
+        .from('data_sources')
+        .update({ layout_config: { viewAsTable: isTable } })
+        .eq('id', selectedSourceId);
+
+      if (updateError) {
+        console.error("Warning: Failed to save layout to DB", updateError);
+      } else {
+        // Update local state so it doesn't revert on next re-render
+        setDataSources(prev => prev.map(ds => 
+          ds.id === selectedSourceId ? { ...ds, layout_config: { ...ds.layout_config, viewAsTable: isTable } } : ds
+        ));
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
 
   if (loading) {
     return (
@@ -110,13 +146,14 @@ export default function Overview() {
   // Analyze columns dynamically
   const sampleRow = sheetData.length > 0 ? sheetData[0] : null;
   const numericColumns: string[] = [];
+  let categoricalColumn: string | null = null;
+  
   const dateColumn = sampleRow ? Object.keys(sampleRow).find(k => k.toLowerCase().includes('date') || k.toLowerCase() === 'time') || 'date' : 'date';
 
   if (sampleRow) {
     Object.keys(sampleRow).forEach(key => {
       if (key.toLowerCase() === 'id' || key === dateColumn) return;
       
-      // Check if it looks numeric
       const isNumeric = sheetData.slice(0, 10).some(row => {
          const val = row[key];
          return typeof val === 'number' || (typeof val === 'string' && val.trim() !== '' && !isNaN(Number(val)));
@@ -124,6 +161,12 @@ export default function Overview() {
       
       if (isNumeric) {
         numericColumns.push(key);
+      } else {
+        // Potential categorical column?
+        const uniqueVals = new Set(sheetData.map(r => String(r[key])).filter(v => v !== 'undefined' && v !== 'null'));
+        if (uniqueVals.size > 0 && uniqueVals.size <= 20) {
+          categoricalColumn = key; // Found a good category
+        }
       }
     });
   }
@@ -138,10 +181,8 @@ export default function Overview() {
     const rawDate = row[dateColumn];
     if (!rawDate) return;
     
-    // Attempt to parse Excel serial dates or normal dates
     let dateObj: Date;
     if (typeof rawDate === 'number') {
-      // Excel serial date (days since Dec 30, 1899)
       dateObj = new Date(Math.round((rawDate - 25569) * 86400 * 1000));
     } else {
       dateObj = new Date(rawDate);
@@ -169,7 +210,7 @@ export default function Overview() {
   const currentPeriod = sortedWeeks.length > 0 ? sortedWeeks[sortedWeeks.length - 1] : null;
   const previousPeriod = sortedWeeks.length > 1 ? sortedWeeks[sortedWeeks.length - 2] : null;
 
-  // Format chart data dynamically
+  // Format chart data
   const chartData = sheetData.map(row => {
     let dateLabel = 'Unknown';
     if (row[dateColumn]) {
@@ -191,6 +232,20 @@ export default function Overview() {
   const primaryChartKey = numericColumns.length > 0 ? numericColumns[0] : null;
   const secondaryChartKey = numericColumns.length > 1 ? numericColumns[1] : primaryChartKey;
 
+  // Format Pie Chart data (if categorical exists)
+  let pieChartData: any[] = [];
+  if (categoricalColumn && primaryChartKey) {
+     const agg: Record<string, number> = {};
+     sheetData.forEach(row => {
+        const cat = String(row[categoricalColumn!] || 'Unknown');
+        const val = Number(row[primaryChartKey!]) || 0;
+        agg[cat] = (agg[cat] || 0) + val;
+     });
+     pieChartData = Object.entries(agg)
+       .map(([name, value]) => ({ name, value }))
+       .sort((a, b) => b.value - a.value);
+  }
+
   const getTitle = (key: string) => key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
 
   return (
@@ -199,6 +254,45 @@ export default function Overview() {
         <h2 style={{ fontSize: '1.75rem', letterSpacing: '-0.02em' }}>Dashboard Overview</h2>
         
         <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+          
+          {/* View Mode Toggles */}
+          <div style={{ display: 'flex', backgroundColor: 'rgba(255,255,255,0.05)', borderRadius: 'var(--radius-md)', padding: '0.25rem', border: '1px solid var(--border-light)' }}>
+            <button 
+              onClick={() => toggleViewMode(false)}
+              style={{ 
+                padding: '0.5rem 1rem', 
+                borderRadius: 'var(--radius-sm)', 
+                border: 'none',
+                background: !viewAsTable ? 'rgba(255, 107, 53, 0.2)' : 'transparent',
+                color: !viewAsTable ? 'var(--accent-color)' : 'var(--text-secondary)',
+                fontWeight: 500,
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.5rem',
+                transition: 'all 0.2s ease'
+              }}>
+              <LayoutDashboard size={16} />
+              Charts
+            </button>
+            <button 
+              onClick={() => toggleViewMode(true)}
+              style={{ 
+                padding: '0.5rem 1rem', 
+                borderRadius: 'var(--radius-sm)', 
+                border: 'none',
+                background: viewAsTable ? 'rgba(255, 107, 53, 0.2)' : 'transparent',
+                color: viewAsTable ? 'var(--accent-color)' : 'var(--text-secondary)',
+                fontWeight: 500,
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.5rem',
+                transition: 'all 0.2s ease'
+              }}>
+              <TableIcon size={16} />
+              Table
+            </button>
+          </div>
+
           <div style={{ position: 'relative' }}>
             <select
               value={selectedSourceId || ''}
@@ -267,52 +361,126 @@ export default function Overview() {
         )}
       </div>
 
-      {/* Charts Grid */}
-      {numericColumns.length > 0 && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(400px, 1fr))', gap: '1.5rem' }}>
-          {/* Primary Line Chart */}
-          {primaryChartKey && (
-            <div className="card">
-              <h3 style={{ fontSize: '1.125rem', marginBottom: '1.5rem', fontWeight: 600 }}>{getTitle(primaryChartKey)} Trend</h3>
-              <div style={{ height: '300px' }}>
-                <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={chartData} margin={{ top: 5, right: 20, bottom: 5, left: 0 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="var(--border-light)" vertical={false} />
-                    <XAxis dataKey="name" stroke="var(--text-secondary)" fontSize={12} tickLine={false} axisLine={false} />
-                    <YAxis stroke="var(--text-secondary)" fontSize={12} tickLine={false} axisLine={false} />
-                    <Tooltip 
-                      contentStyle={{ backgroundColor: 'rgba(15, 23, 42, 0.9)', borderColor: 'var(--border-color)', borderRadius: 'var(--radius-md)', backdropFilter: 'blur(8px)' }}
-                      itemStyle={{ color: '#fff' }}
-                    />
-                    <Line type="monotone" dataKey={primaryChartKey} stroke="var(--accent-color)" strokeWidth={3} dot={{ r: 0 }} activeDot={{ r: 6, fill: '#fff', stroke: 'var(--accent-color)', strokeWidth: 2 }} />
-                  </LineChart>
-                </ResponsiveContainer>
-              </div>
-            </div>
-          )}
-
-          {/* Secondary Bar Chart */}
-          {secondaryChartKey && (
-            <div className="card">
-              <h3 style={{ fontSize: '1.125rem', marginBottom: '1.5rem', fontWeight: 600 }}>{getTitle(secondaryChartKey)} per Period</h3>
-              <div style={{ height: '300px' }}>
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={chartData} margin={{ top: 5, right: 20, bottom: 5, left: 0 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="var(--border-light)" vertical={false} />
-                    <XAxis dataKey="name" stroke="var(--text-secondary)" fontSize={12} tickLine={false} axisLine={false} />
-                    <YAxis stroke="var(--text-secondary)" fontSize={12} tickLine={false} axisLine={false} />
-                    <Tooltip 
-                      contentStyle={{ backgroundColor: 'rgba(15, 23, 42, 0.9)', borderColor: 'var(--border-color)', borderRadius: 'var(--radius-md)', backdropFilter: 'blur(8px)' }}
-                      itemStyle={{ color: '#fff' }}
-                      cursor={{ fill: 'rgba(255,255,255,0.05)' }}
-                    />
-                    <Bar dataKey={secondaryChartKey} fill="#10B981" radius={[4, 4, 0, 0]} />
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-            </div>
+      {/* Main Content Area: Charts or Table */}
+      {viewAsTable ? (
+        <div className="card" style={{ overflowX: 'auto', padding: 0 }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '0.875rem' }}>
+            <thead style={{ backgroundColor: 'rgba(255,255,255,0.02)' }}>
+              <tr>
+                {Object.keys(sheetData[0] || {}).map(key => (
+                  <th key={key} style={{ padding: '1rem', color: 'var(--text-secondary)', fontWeight: 600, borderBottom: '1px solid var(--border-color)', whiteSpace: 'nowrap' }}>
+                    {getTitle(key)}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {sheetData.slice(0, 100).map((row, i) => (
+                <tr key={i} style={{ borderBottom: '1px solid var(--border-light)', transition: 'background-color 0.2s', ':hover': { backgroundColor: 'rgba(255,255,255,0.02)' } } as React.CSSProperties}>
+                  {Object.values(row).map((val: any, j) => (
+                    <td key={j} style={{ padding: '1rem', color: 'var(--text-primary)', whiteSpace: 'nowrap' }}>
+                      {typeof val === 'number' && val > 1000 ? val.toLocaleString() : String(val)}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {sheetData.length > 100 && (
+             <div style={{ padding: '1rem', textAlign: 'center', color: 'var(--text-secondary)', borderTop: '1px solid var(--border-color)' }}>
+               Showing first 100 rows...
+             </div>
           )}
         </div>
+      ) : (
+        numericColumns.length > 0 && (
+          <div style={{ display: 'grid', gridTemplateColumns: pieChartData.length > 0 ? 'repeat(auto-fit, minmax(400px, 1fr))' : 'repeat(auto-fit, minmax(600px, 1fr))', gap: '1.5rem' }}>
+            
+            {/* Primary Line Chart */}
+            {primaryChartKey && (
+              <div className="card" style={{ gridColumn: pieChartData.length > 0 ? 'span 2' : 'span 1' }}>
+                <h3 style={{ fontSize: '1.125rem', marginBottom: '1.5rem', fontWeight: 600 }}>{getTitle(primaryChartKey)} Trend</h3>
+                <div style={{ height: '300px' }}>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={chartData} margin={{ top: 5, right: 20, bottom: 5, left: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="var(--border-light)" vertical={false} />
+                      <XAxis dataKey="name" stroke="var(--text-secondary)" fontSize={12} tickLine={false} axisLine={false} />
+                      <YAxis stroke="var(--text-secondary)" fontSize={12} tickLine={false} axisLine={false} />
+                      <RechartsTooltip 
+                        contentStyle={{ backgroundColor: 'rgba(15, 23, 42, 0.9)', borderColor: 'var(--border-color)', borderRadius: 'var(--radius-md)', backdropFilter: 'blur(8px)' }}
+                        itemStyle={{ color: '#fff' }}
+                      />
+                      <Line type="monotone" dataKey={primaryChartKey} stroke="var(--accent-color)" strokeWidth={3} dot={{ r: 0 }} activeDot={{ r: 6, fill: '#fff', stroke: 'var(--accent-color)', strokeWidth: 2 }} />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+            )}
+
+            {/* Secondary Bar Chart */}
+            {secondaryChartKey && (
+              <div className="card">
+                <h3 style={{ fontSize: '1.125rem', marginBottom: '1.5rem', fontWeight: 600 }}>{getTitle(secondaryChartKey)} per Period</h3>
+                <div style={{ height: '300px' }}>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={chartData} margin={{ top: 5, right: 20, bottom: 5, left: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="var(--border-light)" vertical={false} />
+                      <XAxis dataKey="name" stroke="var(--text-secondary)" fontSize={12} tickLine={false} axisLine={false} />
+                      <YAxis stroke="var(--text-secondary)" fontSize={12} tickLine={false} axisLine={false} />
+                      <RechartsTooltip 
+                        contentStyle={{ backgroundColor: 'rgba(15, 23, 42, 0.9)', borderColor: 'var(--border-color)', borderRadius: 'var(--radius-md)', backdropFilter: 'blur(8px)' }}
+                        itemStyle={{ color: '#fff' }}
+                        cursor={{ fill: 'rgba(255,255,255,0.05)' }}
+                      />
+                      <Bar dataKey={secondaryChartKey} fill="#10B981" radius={[4, 4, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+            )}
+
+            {/* Smart Pie Chart */}
+            {pieChartData.length > 0 && primaryChartKey && categoricalColumn && (
+              <div className="card">
+                <h3 style={{ fontSize: '1.125rem', marginBottom: '1.5rem', fontWeight: 600 }}>{getTitle(primaryChartKey)} by {getTitle(categoricalColumn)}</h3>
+                <div style={{ height: '300px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie
+                        data={pieChartData}
+                        cx="50%"
+                        cy="50%"
+                        innerRadius={60}
+                        outerRadius={90}
+                        paddingAngle={5}
+                        dataKey="value"
+                        stroke="none"
+                      >
+                        {pieChartData.map((entry, index) => (
+                          <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                        ))}
+                      </Pie>
+                      <RechartsTooltip 
+                        contentStyle={{ backgroundColor: 'rgba(15, 23, 42, 0.9)', borderColor: 'var(--border-color)', borderRadius: 'var(--radius-md)', backdropFilter: 'blur(8px)' }}
+                        itemStyle={{ color: '#fff' }}
+                        formatter={(value: number) => value.toLocaleString()}
+                      />
+                    </PieChart>
+                  </ResponsiveContainer>
+                </div>
+                {/* Custom Legend */}
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '1rem', justifyContent: 'center', marginTop: '1rem' }}>
+                  {pieChartData.slice(0, 8).map((entry, index) => (
+                    <div key={entry.name} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.875rem' }}>
+                      <div style={{ width: '12px', height: '12px', borderRadius: '50%', backgroundColor: COLORS[index % COLORS.length] }} />
+                      <span style={{ color: 'var(--text-secondary)' }}>{entry.name}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )
       )}
     </div>
   );
