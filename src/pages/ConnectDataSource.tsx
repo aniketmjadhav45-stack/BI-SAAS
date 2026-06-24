@@ -1,13 +1,13 @@
-import React, { useState, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useState, useRef, useEffect } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { fetchSheetData, extractSpreadsheetId } from '../lib/googleSheets';
 import { useAuth } from '../contexts/AuthContext';
-import { Link2, AlertCircle, CheckCircle2, FileSpreadsheet, Upload } from 'lucide-react';
+import { Link2, AlertCircle, CheckCircle2, FileSpreadsheet, Upload, BarChart3 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
 export default function ConnectDataSource() {
-  const [connectionType, setConnectionType] = useState<'sheets' | 'excel'>('sheets');
+  const [connectionType, setConnectionType] = useState<'sheets' | 'excel' | 'meta'>('sheets');
   const [url, setUrl] = useState('');
   const [name, setName] = useState('');
   const [loading, setLoading] = useState(false);
@@ -17,9 +17,64 @@ export default function ConnectDataSource() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { user } = useAuth();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+
+  useEffect(() => {
+    const code = searchParams.get('code');
+    if (code && user) {
+      handleMetaAuth(code);
+    }
+  }, [user, searchParams]);
+
+  const handleMetaAuth = async (code: string) => {
+    setLoading(true);
+    setError(null);
+    try {
+      const redirectUri = `${window.location.origin}/connect`;
+      const res = await fetch('/api/meta-auth', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code, redirect_uri: redirectUri })
+      });
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+
+      // Save token securely to Supabase
+      const { error: dbError } = await supabase
+        .from('meta_connections')
+        .insert([{ user_id: user!.id, access_token: data.access_token }]);
+
+      if (dbError) throw new Error(`Database error: ${dbError.message}`);
+
+      navigate('/meta-accounts');
+    } catch (err: any) {
+      setError(err.message || 'Failed to authenticate with Meta.');
+      setConnectionType('meta');
+    } finally {
+      setLoading(false);
+      window.history.replaceState({}, document.title, '/connect');
+    }
+  };
+
+  const initiateMetaLogin = () => {
+    const appId = import.meta.env.VITE_META_APP_ID;
+    if (!appId) {
+      setError('VITE_META_APP_ID is not set in environment variables.');
+      return;
+    }
+    const redirectUri = `${window.location.origin}/connect`;
+    const scopes = 'ads_management,ads_read';
+    const authUrl = `https://www.facebook.com/v19.0/dialog/oauth?client_id=${appId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${scopes}`;
+    window.location.href = authUrl;
+  };
 
   const handleConnect = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (connectionType === 'meta') {
+      initiateMetaLogin();
+      return;
+    }
+
     setLoading(true);
     setError(null);
     setSuccess(false);
@@ -120,19 +175,19 @@ export default function ConnectDataSource() {
   };
 
   return (
-    <div style={{ maxWidth: '600px', margin: '0 auto' }}>
+    <div style={{ maxWidth: '700px', margin: '0 auto' }}>
       <h2 style={{ fontSize: '1.5rem', marginBottom: '1.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
         <Link2 size={24} color="var(--accent-color)" />
         Connect a Data Source
       </h2>
       
-      <div style={{ display: 'flex', gap: '1rem', marginBottom: '1.5rem' }}>
+      <div style={{ display: 'flex', gap: '0.75rem', marginBottom: '1.5rem' }}>
         <button 
           type="button"
           onClick={() => setConnectionType('sheets')}
           style={{ 
             flex: 1, 
-            padding: '1rem', 
+            padding: '1rem 0.5rem', 
             borderRadius: 'var(--radius-md)', 
             border: `2px solid ${connectionType === 'sheets' ? 'var(--accent-color)' : 'var(--border-color)'}`,
             backgroundColor: connectionType === 'sheets' ? 'rgba(255, 107, 53, 0.1)' : 'var(--card-bg)',
@@ -145,14 +200,14 @@ export default function ConnectDataSource() {
             cursor: 'pointer'
           }}
         >
-          <Link2 size={20} /> Google Sheets
+          <Link2 size={18} /> Google Sheets
         </button>
         <button 
           type="button"
           onClick={() => setConnectionType('excel')}
           style={{ 
             flex: 1, 
-            padding: '1rem', 
+            padding: '1rem 0.5rem', 
             borderRadius: 'var(--radius-md)', 
             border: `2px solid ${connectionType === 'excel' ? 'var(--accent-color)' : 'var(--border-color)'}`,
             backgroundColor: connectionType === 'excel' ? 'rgba(255, 107, 53, 0.1)' : 'var(--card-bg)',
@@ -165,7 +220,27 @@ export default function ConnectDataSource() {
             cursor: 'pointer'
           }}
         >
-          <FileSpreadsheet size={20} /> Excel Upload
+          <FileSpreadsheet size={18} /> Excel Upload
+        </button>
+        <button 
+          type="button"
+          onClick={() => setConnectionType('meta')}
+          style={{ 
+            flex: 1, 
+            padding: '1rem 0.5rem', 
+            borderRadius: 'var(--radius-md)', 
+            border: `2px solid ${connectionType === 'meta' ? '#1877F2' : 'var(--border-color)'}`,
+            backgroundColor: connectionType === 'meta' ? 'rgba(24, 119, 242, 0.1)' : 'var(--card-bg)',
+            color: connectionType === 'meta' ? '#1877F2' : 'var(--text-dark)',
+            fontWeight: 'bold',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: '0.5rem',
+            cursor: 'pointer'
+          }}
+        >
+          <BarChart3 size={18} /> Meta Ads
         </button>
       </div>
 
@@ -173,7 +248,9 @@ export default function ConnectDataSource() {
         <p style={{ color: 'var(--text-secondary)', marginBottom: '1.5rem' }}>
           {connectionType === 'sheets' 
             ? 'Paste a public Google Sheets link below. Your sheet must be set to "Anyone with the link can view".'
-            : 'Upload a local Excel file (.xlsx) directly to Datapulse. The data will be securely stored in your account.'}
+            : connectionType === 'excel' 
+            ? 'Upload a local Excel file (.xlsx) directly to Datapulse. The data will be securely stored in your account.'
+            : 'Connect your Meta (Facebook) Ads account to automatically pull live campaign performance data into your dashboard.'}
         </p>
 
         {error && (
@@ -191,19 +268,21 @@ export default function ConnectDataSource() {
         )}
 
         <form onSubmit={handleConnect} className="flex flex-col gap-4">
-          <div>
-            <label className="label" htmlFor="name">Data Source Name (Optional)</label>
-            <input
-              id="name"
-              type="text"
-              className="input"
-              placeholder={connectionType === 'sheets' ? "e.g. Q3 Sales Data" : "Leave blank to use filename"}
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-            />
-          </div>
+          {connectionType !== 'meta' && (
+            <div>
+              <label className="label" htmlFor="name">Data Source Name (Optional)</label>
+              <input
+                id="name"
+                type="text"
+                className="input"
+                placeholder={connectionType === 'sheets' ? "e.g. Q3 Sales Data" : "Leave blank to use filename"}
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+              />
+            </div>
+          )}
 
-          {connectionType === 'sheets' ? (
+          {connectionType === 'sheets' && (
             <div>
               <label className="label" htmlFor="url">Google Sheets Link</label>
               <input
@@ -216,7 +295,9 @@ export default function ConnectDataSource() {
                 required
               />
             </div>
-          ) : (
+          )}
+          
+          {connectionType === 'excel' && (
             <div>
               <label className="label" htmlFor="fileUpload">Excel File (.xlsx)</label>
               <input
@@ -237,25 +318,43 @@ export default function ConnectDataSource() {
             </div>
           )}
 
-          <button type="submit" className="btn btn-primary" disabled={loading} style={{ marginTop: '0.5rem', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}>
-            {loading ? 'Processing...' : (connectionType === 'sheets' ? <><Link2 size={18} /> Connect Sheet</> : <><Upload size={18} /> Upload Excel</>)}
+          <button 
+            type="submit" 
+            className="btn btn-primary" 
+            disabled={loading} 
+            style={{ 
+              marginTop: '0.5rem', 
+              display: 'flex', 
+              alignItems: 'center', 
+              justifyContent: 'center', 
+              gap: '0.5rem',
+              backgroundColor: connectionType === 'meta' ? '#1877F2' : undefined
+            }}
+          >
+            {loading ? 'Processing...' : (
+              connectionType === 'sheets' ? <><Link2 size={18} /> Connect Sheet</> : 
+              connectionType === 'excel' ? <><Upload size={18} /> Upload Excel</> :
+              <><BarChart3 size={18} /> Login with Meta</>
+            )}
           </button>
         </form>
       </div>
       
-      <div style={{ marginTop: '2rem', padding: '1.5rem', backgroundColor: 'var(--bg-color-light)', borderRadius: 'var(--radius-lg)' }}>
-        <h3 style={{ fontSize: '1rem', marginBottom: '0.5rem' }}>Expected Format</h3>
-        <p style={{ fontSize: '0.875rem', color: 'var(--text-secondary)' }}>
-          For the dashboard to generate metrics and charts automatically, please ensure your sheet has a header row with some or all of the following exact column names (case-insensitive):
-        </p>
-        <ul style={{ fontSize: '0.875rem', color: 'var(--text-secondary)', marginLeft: '1.5rem', marginTop: '0.5rem' }}>
-          <li><code>date</code> (e.g. YYYY-MM-DD or MM/DD/YYYY)</li>
-          <li><code>revenue</code> (numbers only)</li>
-          <li><code>leads</code> (numbers only)</li>
-          <li><code>tickets</code> (numbers only)</li>
-          <li><code>attendance</code> (numbers only)</li>
-        </ul>
-      </div>
+      {connectionType !== 'meta' && (
+        <div style={{ marginTop: '2rem', padding: '1.5rem', backgroundColor: 'var(--bg-color-light)', borderRadius: 'var(--radius-lg)' }}>
+          <h3 style={{ fontSize: '1rem', marginBottom: '0.5rem' }}>Expected Format</h3>
+          <p style={{ fontSize: '0.875rem', color: 'var(--text-secondary)' }}>
+            For the dashboard to generate metrics and charts automatically, please ensure your sheet has a header row with some or all of the following exact column names (case-insensitive):
+          </p>
+          <ul style={{ fontSize: '0.875rem', color: 'var(--text-secondary)', marginLeft: '1.5rem', marginTop: '0.5rem' }}>
+            <li><code>date</code> (e.g. YYYY-MM-DD or MM/DD/YYYY)</li>
+            <li><code>revenue</code> (numbers only)</li>
+            <li><code>leads</code> (numbers only)</li>
+            <li><code>tickets</code> (numbers only)</li>
+            <li><code>attendance</code> (numbers only)</li>
+          </ul>
+        </div>
+      )}
     </div>
   );
 }

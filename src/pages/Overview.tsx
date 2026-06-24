@@ -366,7 +366,9 @@ function OverviewContent() {
             <p style={{ color: 'var(--text-secondary)' }}>No numeric data found to display metrics.</p>
           ) : (
             numericColumns.map(col => {
-              const isMonetary = ['revenue', 'sales', 'price', 'cost', 'spend', 'amount', 'profit', 'gst', 'tax'].some(k => col.toLowerCase().includes(k));
+              const lowerCol = col.toLowerCase();
+              const isMonetary = ['revenue', 'sales', 'price', 'cost', 'spend', 'amount', 'profit', 'gst', 'tax'].some(k => lowerCol.includes(k)) 
+                                  && !['cpc', 'ctr', 'cost_per_click', 'click_through_rate'].includes(lowerCol);
               const prefix = isMonetary ? '$' : '';
               const title = getTitle(col);
               

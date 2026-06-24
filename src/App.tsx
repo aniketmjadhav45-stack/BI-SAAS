@@ -1,4 +1,3 @@
-
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { AuthProvider } from './contexts/AuthContext';
 import ProtectedRoute from './components/ProtectedRoute';
@@ -11,6 +10,7 @@ import Support from './pages/Support';
 import Finance from './pages/Finance';
 import Settings from './pages/Settings';
 import ConnectDataSource from './pages/ConnectDataSource';
+import MetaAccountSelector from './pages/MetaAccountSelector';
 import AskDatapulse from './pages/AskDatapulse';
 import MyReports from './pages/MyReports';
 
@@ -26,6 +26,7 @@ function App() {
             <Route element={<Layout />}>
               <Route path="/" element={<Overview />} />
               <Route path="/connect" element={<ConnectDataSource />} />
+              <Route path="/meta-accounts" element={<MetaAccountSelector />} />
               <Route path="/sales" element={<Sales />} />
               <Route path="/support" element={<Support />} />
               <Route path="/finance" element={<Finance />} />
